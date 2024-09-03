@@ -1,3 +1,2 @@
-Flask==2.3.4
-mysql-connector-python==8.0.33
-Flask-MySQLdb==1.0.1
+Flask==3.0.3
+flask-mysqldb==2.0.0
