@@ -87,7 +87,7 @@ def get_all_singers():
     cur = mysql.connection.cursor()
     cur.execute("SELECT * FROM singers_table")
     singers = cur.fetchall()
-    return jsonify([{"id": singer[0], "name": singer[1], "profile": singer[2]} for singer in singers])
+    return jsonify([{"singer_id": singer[0], "singer_name": singer[1], "singer_profile": singer[2]} for singer in singers])
 
 # 2. Get a singer by ID
 @app.route('/singers/<int:singer_id>', methods=['GET'])
