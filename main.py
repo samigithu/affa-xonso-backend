@@ -1,5 +1,6 @@
 from flask import Flask, request, jsonify
 from flask_cors import CORS
+import MySQLdb.cursors 
 from flask_mysqldb import MySQL
 
 app = Flask(__name__)
@@ -12,8 +13,9 @@ app.config['MYSQL_PASSWORD'] = '9ql3Lh6nyT'
 app.config['MYSQL_DB'] = 'sql12729214'
 app.config['MYSQL_PORT'] = 3306
 
-mysql = MySQL(app)
 
+
+mysql = MySQL(app)
 @app.route('/api')
 def hello_world():
     return "hello world"
@@ -28,12 +30,7 @@ def get_all_albums():
     cur = mysql.connection.cursor()
     cur.execute("SELECT * FROM album_table")
     albums = cur.fetchall()
-    output = []
-    for album in albums:
-        output.append({"album_id": album[0], "album_title": album[1], "album_image": album[2], "album_description": album[3]})
-    cur.close()
-    return jsonify({"albums": output})
-
+    return jsonify([{"album_id": album[0], "album_title": album[1], "album_image": album[2], "album_description": album[3]} for album in albums])
 @app.route("/albums/<int:album_id>", methods=["GET"])
 def get_album(album_id):
     cur = mysql.connection.cursor()
@@ -96,7 +93,7 @@ def get_singer_by_id(singer_id):
     cur.execute("SELECT * FROM singers_table WHERE singer_id = %s", (singer_id,))
     singer = cur.fetchone()
     if singer:
-        return jsonify({"id": singer[0], "name": singer[1], "profile": singer[2]})
+        return jsonify({"singer_id": singer[0], "singer_name": singer[1], "singer_profile": singer[2]})
     else:
         return jsonify({"error": "Singer not found"}), 404
 
@@ -105,8 +102,8 @@ def get_singer_by_id(singer_id):
 def create_singer():
     cur = mysql.connection.cursor()
     data = request.get_json()
-    name = data["name"]
-    profile = data["profile"]
+    name = data["singer_name"]
+    profile = data["singer_profile"]
     cur.execute("INSERT INTO singers_table (singer_name, singer_profile) VALUES (%s, %s)", (name, profile))
     db.commit()
     return jsonify({"message": "Singer created successfully"}), 201
@@ -116,8 +113,8 @@ def create_singer():
 def update_singer(singer_id):
     cur = mysql.connection.cursor()
     data = request.get_json()
-    name = data["name"]
-    profile = data["profile"]
+    name = data["singer_name"]
+    profile = data["singer_profile"]
     cur.execute("UPDATE singers_table SET singer_name = %s, singer_profile = %s WHERE singer_id = %s", (name, profile, singer_id))
     db.commit()
     return jsonify({"message": "Singer updated successfully"})
@@ -130,14 +127,215 @@ def delete_singer(singer_id):
     db.commit()
     return jsonify({"message": "Singer deleted successfully"}), 204
     
+    
 @app.route("/songs", methods=["GET"])
-def get_songs():
+def getALL_songs():
     cur = mysql.connection.cursor()
     cur.execute("SELECT * FROM songs_table")
     songs = cur.fetchall()
     columns = [desc[0] for desc in cur.description]
     return jsonify([dict(zip(columns, song)) for song in songs])
 
+    
+@app.route("/search_songs", methods=["GET"])
+def get_songs():
+    try:
+        query = request.args.get('query', '')
+
+        if not query:
+            cur = mysql.connection.cursor(MySQLdb.cursors.DictCursor)
+            cur.execute('''
+                SELECT
+                    s.song_id,
+                    s.song_title,
+                    c.category_name,
+                    sg.singer_name,
+                    a.album_title,
+                    s.song_description,
+                    s.is_favorite
+                FROM
+                    songs_table s
+                INNER JOIN
+                    song_category_table c ON s.category_id= c.category_id
+                INNER JOIN
+                    singers_table sg ON sg.singer_id = s.singer_id
+                INNER JOIN
+                    album_table a ON a.album_id = s.album_id
+            ''')
+            songs = cur.fetchall()
+            return jsonify(songs)
+        else:
+            like_query = f"%{query}%"
+            cur = mysql.connection.cursor(MySQLdb.cursors.DictCursor)
+            cur.execute('''
+                SELECT
+                    s.song_id,
+                    s.song_title,
+                    c.category_name,
+                    sg.singer_name,
+                    a.album_title,
+                    s.song_description,
+                    s.is_favorite
+                FROM
+                    songs_table s
+                INNER JOIN
+                    song_category_table c ON s.category_id= c.category_id
+                INNER JOIN
+                    singers_table sg ON sg.singer_id = s.singer_id
+                INNER JOIN
+                    album_table a ON a.album_id = s.album_id
+                WHERE
+                    s.song_title LIKE %s OR
+                    sg.singer_name LIKE %s OR
+                    c.category_name LIKE %s
+            ''', (like_query, like_query, like_query))
+            result = cur.fetchall()
+            return jsonify(result)
+    except Exception as e:
+        app.logger.error(str(e))
+        return jsonify({"error": str(e)}), 500   
+@app.route('/singerx/songs', methods=['GET'])
+def get_single_songs():
+    try:
+        # Get the singer_id from the query parameters
+        singer_id = request.args.get('singer_id')
+
+        if not singer_id:
+            return jsonify({"error": "singer_id parameter is required"}), 400
+
+        # Create database connection
+        cursor = mysql.connection.cursor(MySQLdb.cursors.DictCursor)
+
+        # Raw SQL query to fetch songs with joins on category, album, and singers
+        query = '''
+        SELECT 
+            s.song_title,
+            s.song_id,
+            s.song_description,
+            s.is_favorite,
+            c.category_name,
+            a.album_title,
+            sg.singer_name
+        FROM 
+            songs_table s
+        INNER JOIN 
+            song_category_table c ON s.category_id = c.category_id
+        INNER JOIN 
+            album_table a ON s.album_id= a.album_id
+        INNER JOIN 
+            singers_table sg ON s.singer_id= sg.singer_id
+        WHERE 
+            s.singer_id = %s
+        '''
+        
+        cursor.execute(query, (singer_id,))
+        results = cursor.fetchall()
+        return jsonify(results)
+    except Exception as e:
+     return jsonify({"error": str(e)}), 500  
+@app.route('/categorix/categories', methods=['GET'])
+def get_category_songs():
+    try:
+        # Get the singer_id from the query parameters
+        category_id = request.args.get('category_id')
+
+        if not category_id:
+            return jsonify({"error": "category_id parameter is required"}), 400
+
+        # Create database connection
+        cursor = mysql.connection.cursor(MySQLdb.cursors.DictCursor)
+
+        # Raw SQL query to fetch songs with joins on category, album, and singers
+        query = '''
+        SELECT 
+            *
+        FROM 
+            song_category_table s
+        INNER JOIN 
+            songs_table c ON s.category_id = c.category_id
+        INNER JOIN 
+            singers_table sg ON c.singer_id= sg.singer_id
+        WHERE 
+            s.category_id = %s
+        '''
+        #cursor = mysql.connection.cursor()
+        cursor.execute(query, (category_id,))
+        results = cursor.fetchall()
+        return jsonify(results)
+    except Exception as e:
+     return jsonify({"error": str(e)}), 500    
+@app.route('/add_song', methods=['POST'])
+def add_song():
+    data = request.json
+    if not all(k in data for k in ('song_title', 'category_id', 'singer_id', 'album_id', 'song_description', 'is_favorite')):
+        return jsonify({"error": "Missing required fields"}), 400
+
+    try:
+        cursor = mysql.connection.cursor()
+
+        query = """
+        INSERT INTO songs_table (song_title, category_id, singer_id, album_id, song_description, is_favorite)
+        VALUES (%s, %s, %s, %s, %s, %s)
+        """
+        cursor.execute(query, (
+            data['song_title'], 
+            data['category_id'], 
+            data['singer_id'], 
+            data['album_id'], 
+            data['song_description'], 
+            data['is_favorite']
+        ))
+        mysql.connection.commit()
+
+        return jsonify({"message": "Song added successfully"}), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500  
+@app.route('/songs/<int:song_id>/isfavorite', methods=['GET'])
+def get_favorite_status(song_id):
+    cursor = mysql.connection.cursor(MySQLdb.cursors.DictCursor)
+    cursor.execute("SELECT is_favorite FROM songs_table WHERE song_id = %s", (song_id,))
+    result = cursor.fetchone()
+    if result:
+        return jsonify(result)
+    else:
+        return jsonify({"error": "Song not found"}), 404
+@app.route('/songs/favorite', methods=['GET'])
+def get_favorite_songs():
+          cursor = mysql.connection.cursor(MySQLdb.cursors.DictCursor)
+          cursor.execute( '''
+        SELECT 
+            s.song_title,
+            s.song_id,
+            s.song_description,
+            s.is_favorite,
+            c.category_name,
+            a.album_title,
+            sg.singer_name
+        FROM 
+            songs_table s
+        INNER JOIN 
+            song_category_table c ON s.category_id = c.category_id
+        INNER JOIN 
+            album_table a ON s.album_id= a.album_id
+        INNER JOIN 
+            singers_table sg ON s.singer_id= sg.singer_id
+        WHERE  s.is_favorite = 1 ''')
+          result = cursor.fetchall()
+          if result:
+              return jsonify(result)
+          else:
+            return jsonify({"error": "Song not found"}), 404
+     
+@app.route('/songs/updatefavorite/<int:song_id>/favorite', methods=['POST'])
+def update_favorite(song_id):
+    data = request.json
+    is_favorite = data.get('is_favorite')
+    
+    cursor = mysql.connection.cursor()
+    cursor.execute("UPDATE songs_table SET is_favorite = %s WHERE song_id = %s", (is_favorite, song_id))
+    mysql.connection.commit()
+    
+    return jsonify({"message": "Favorite status updated"})
 @app.route("/songs", methods=["POST"])
 def create_song():
     cur = mysql.connection.cursor()
@@ -151,7 +349,6 @@ def create_song():
 @app.route("/songs/<int:song_id>", methods=["GET"])
 def get_song(song_id):
     cur = mysql.connection.cursor()
-    cur.execute("SELECT * FROM songs_table WHERE song_id = %s", (song_id,))
     song = cur.fetchone()
     if song is None:
         return jsonify({"error": "Song not found"}), 404
@@ -206,7 +403,7 @@ def get_categories():
         return jsonify({'message': str(e)}), 500
 
 # Get a category by ID
-@app.route('/category/<int:category_id>', methods=['GET'])
+@app.route('/categories/<int:category_id>', methods=['GET'])
 def get_category(category_id):
     try:
         cur = mysql.connection.cursor()
